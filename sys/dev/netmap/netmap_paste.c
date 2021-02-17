@@ -1170,7 +1170,7 @@ pst_sodtor(NM_SOCK_T *so)
 		pst_wso(NULL, so);
 		return;
 	}
-	nm_prinf("unregistering sockets");
+	//nm_prinf("unregistering sockets");
 	pst_unregister_socket(soa, 0);
 	if (so->so_dtor) {
 		so->so_dtor(so);
@@ -1189,7 +1189,7 @@ netmap_pst_bdg_dtor(const struct netmap_vp_adapter *vpna)
 
 	sna = (struct netmap_pst_adapter *)(void *)(uintptr_t)vpna;
 	mtx_lock(&sna->so_adapters_lock);
-	nm_prinf("unregistering sockets");
+	//nm_prinf("unregistering sockets");
 	for (i = 0; i < sna->so_adapters_max; i++) {
 		struct pst_so_adapter *soa = sna->so_adapters[i];
 		if (soa)
@@ -1304,9 +1304,14 @@ static int
 netmap_pst_reg(struct netmap_adapter *na, int onoff)
 {
 	struct netmap_vp_adapter *vpna = (struct netmap_vp_adapter *)na;
+	struct netmap_pst_adapter *sna = (struct netmap_pst_adapter *)vpna;
 	int err;
+	enum txrx t;
 
 	if (onoff) {
+		struct netmap_priv_d *kpriv;
+		struct netmap_if *nifp;
+
 		pst_write_offset(na, 0);
 		if (na->active_fds > 0) {
 			return 0;
@@ -1314,6 +1319,36 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 		err = pst_extra_alloc(na);
 		if (err)
 			return err;
+		/* get a fake reference */
+		kpriv = netmap_priv_new();
+		kpriv->np_na = na;
+		err = netmap_mem_finalize(na->nm_mem, na);
+		if (err)
+			goto del_kpriv;
+		for_rx_tx(t) {
+			u_int i;
+
+			kpriv->np_qfirst[t] = 0;
+			kpriv->np_qlast[t] = nma_get_nrings(na, t);
+			for (i = 0; i < nma_get_nrings(na, t); i++) {
+				struct netmap_kring *kring = NMR(na, t)[i];
+
+				kring->users++;
+				kring->nr_pending_mode = NKR_NETMAP_ON;
+			}
+		}
+		nifp = netmap_mem_if_new(na, kpriv);
+		if (nifp == NULL) {
+			err = ENOMEM;
+del_kpriv:
+			netmap_priv_delete(kpriv);
+			pst_extra_free(na);
+			return err;
+		}
+		na->active_fds++;
+		kpriv->np_nifp = nifp;
+		sna->kpriv = kpriv;
+		nm_prinf("kpriv done");
 	}
 	if (!onoff) {
 		struct nm_bridge *b = vpna->na_bdg;
@@ -1341,6 +1376,26 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 			}
 			netmap_adapter_put(slvna);
 		}
+
+		/* drop the fake ref */
+		for_rx_tx(t) {
+			u_int i;
+			for (i = 0; i < nma_get_nrings(na, t); i++) {
+				struct netmap_kring *kring = NMR(na, t)[i];
+
+				kring->users--;
+				kring->nr_pending_mode = NKR_NETMAP_OFF;
+			}
+		}
+		--sna->kpriv->np_refs;
+		na->active_fds--;
+		netmap_mem_if_delete(na, sna->kpriv->np_nifp);
+		netmap_mem_deref(na->nm_mem, na);
+		sna->kpriv->np_na = NULL;
+		sna->kpriv->np_nifp = NULL;
+		bzero(sna->kpriv, sizeof(*sna->kpriv));	/* for safety */
+		nm_os_free(sna->kpriv);
+
 		pst_extra_free(na);
 	}
 	err = netmap_vp_reg(na, onoff);

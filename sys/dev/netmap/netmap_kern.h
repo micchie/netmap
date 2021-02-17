@@ -1271,6 +1271,7 @@ struct netmap_pst_adapter {
 #ifdef __FreeBSD__
 	void *eventso[64];
 #endif
+	struct netmap_priv_d *kpriv;
 };
 
 struct netmap_adapter *stna(const struct netmap_adapter *slave);
