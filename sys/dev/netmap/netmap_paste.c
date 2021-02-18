@@ -1319,7 +1319,9 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 		err = pst_extra_alloc(na);
 		if (err)
 			return err;
-		/* get a fake reference */
+		/* fake reference to rings and buffers, but no active_fd
+		 *
+		 * */
 		kpriv = netmap_priv_new();
 		kpriv->np_na = na;
 		err = netmap_mem_finalize(na->nm_mem, na);
@@ -1345,15 +1347,17 @@ del_kpriv:
 			pst_extra_free(na);
 			return err;
 		}
-		na->active_fds++;
+		//na->active_fds++;
 		kpriv->np_nifp = nifp;
 		sna->kpriv = kpriv;
 		nm_prinf("kpriv done");
+		netmap_adapter_get(na);
 	}
 	if (!onoff) {
 		struct nm_bridge *b = vpna->na_bdg;
 		int i;
 
+		nm_prinf("unreg");
 		for_bdg_ports(i, b) {
 			struct netmap_vp_adapter *s;
 			struct netmap_adapter *slvna;
@@ -1388,13 +1392,13 @@ del_kpriv:
 			}
 		}
 		--sna->kpriv->np_refs;
-		na->active_fds--;
 		netmap_mem_if_delete(na, sna->kpriv->np_nifp);
 		netmap_mem_deref(na->nm_mem, na);
 		sna->kpriv->np_na = NULL;
 		sna->kpriv->np_nifp = NULL;
 		bzero(sna->kpriv, sizeof(*sna->kpriv));	/* for safety */
 		nm_os_free(sna->kpriv);
+		netmap_adapter_put(na);
 
 		pst_extra_free(na);
 	}
