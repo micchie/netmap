@@ -994,6 +994,7 @@ netmap_mem_drop(struct netmap_adapter *na)
 	 * restore it now and drop the temporary one
 	 */
 	if (netmap_mem_deref(na->nm_mem, na)) {
+		nm_prinf("final, restore");
 		netmap_mem_restore(na);
 	}
 }
@@ -1015,6 +1016,7 @@ netmap_do_unregif(struct netmap_priv_d *priv)
 	na->active_fds--;
 	/* unset nr_pending_mode and possibly release exclusive mode */
 	netmap_krings_put(priv);
+	nm_prinf("active_fds %d (deced) pending %d", na->active_fds, nm_kring_pending(priv));
 
 #ifdef	WITH_MONITOR
 	/* XXX check whether we have to do something with monitor
@@ -1105,6 +1107,7 @@ void
 netmap_priv_delete(struct netmap_priv_d *priv)
 {
 	struct netmap_adapter *na = priv->np_na;
+	int pst = !(strncmp("pst:0", na->name, 5));
 
 	/* number of active references to this fd */
 	if (--priv->np_refs > 0) {
@@ -1117,6 +1120,18 @@ netmap_priv_delete(struct netmap_priv_d *priv)
 	netmap_unget_na(na, priv->np_ifp);
 	bzero(priv, sizeof(*priv));	/* for safety */
 	nm_os_free(priv);
+
+	if (pst) {
+		struct netmap_pst_adapter *sna =
+				(struct netmap_pst_adapter *)na;
+		nm_prinf("%s pst %d ref %d", na->name, pst, na->na_refcount);
+		if (na->na_refcount == 1) {
+			netmap_do_unregif(sna->kpriv);
+			nm_os_free(sna->kpriv);
+			sna->kpriv = NULL;
+			netmap_adapter_put(na);
+		}
+	}
 }
 
 
@@ -1884,6 +1899,7 @@ netmap_interp_ringid(struct netmap_priv_d *priv, struct nmreq_header *hdr)
 		switch (nr_mode) {
 		case NR_REG_ALL_NIC:
 		case NR_REG_NULL:
+			nm_prinf("ALL_NIC");
 			priv->np_qfirst[t] = 0;
 			priv->np_qlast[t] = nma_get_nrings(na, t);
 			nm_prdis("ALL/PIPE: %s %d %d", nm_txrx2str(t),

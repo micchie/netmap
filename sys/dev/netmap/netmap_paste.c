@@ -1306,11 +1306,14 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 	struct netmap_vp_adapter *vpna = (struct netmap_vp_adapter *)na;
 	struct netmap_pst_adapter *sna = (struct netmap_pst_adapter *)vpna;
 	int err;
-	enum txrx t;
 
 	if (onoff) {
 		struct netmap_priv_d *kpriv;
 		struct netmap_if *nifp;
+		enum txrx t;
+		//struct nmreq_header hdr;
+		//struct nmreq_register *reg =
+		//	(struct nmreq_register *)&hdr.nr_body;
 
 		pst_write_offset(na, 0);
 		if (na->active_fds > 0) {
@@ -1319,10 +1322,17 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 		err = pst_extra_alloc(na);
 		if (err)
 			return err;
-		/* fake reference to rings and buffers, but no active_fd
-		 *
-		 * */
+
+		/* fake reference to rings and buffers without hdr */
 		kpriv = netmap_priv_new();
+#if 0
+		bzero(reg, sizeof(*reg));
+		reg->nr_mode = NR_REG_ALL_NIC;
+		nm_prinf("dummy add active_fds");
+		na->active_fds++; // XXX
+		netmap_do_regif(kpriv, na, &hdr);
+		na->active_fds--; // XXX
+#endif
 		kpriv->np_na = na;
 		err = netmap_mem_finalize(na->nm_mem, na);
 		if (err)
@@ -1333,12 +1343,14 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 			kpriv->np_qfirst[t] = 0;
 			kpriv->np_qlast[t] = nma_get_nrings(na, t);
 			for (i = 0; i < nma_get_nrings(na, t); i++) {
-				struct netmap_kring *kring = NMR(na, t)[i];
+				//struct netmap_kring *kring = NMR(na, t)[i];
 
-				kring->users++;
-				kring->nr_pending_mode = NKR_NETMAP_ON;
+				NMR(na, t)[i]->users++;
+				//kring->users++;
+				//kring->nr_pending_mode = NKR_NETMAP_ON;
 			}
 		}
+		//err = netmap_mem_rings_create(na);
 		nifp = netmap_mem_if_new(na, kpriv);
 		if (nifp == NULL) {
 			err = ENOMEM;
@@ -1347,17 +1359,17 @@ del_kpriv:
 			pst_extra_free(na);
 			return err;
 		}
-		//na->active_fds++;
 		kpriv->np_nifp = nifp;
+		na->active_fds++;
+
 		sna->kpriv = kpriv;
-		nm_prinf("kpriv done");
 		netmap_adapter_get(na);
 	}
 	if (!onoff) {
 		struct nm_bridge *b = vpna->na_bdg;
 		int i;
 
-		nm_prinf("unreg");
+		nm_prinf("%s unreg", na->name);
 		for_bdg_ports(i, b) {
 			struct netmap_vp_adapter *s;
 			struct netmap_adapter *slvna;
@@ -1382,23 +1394,8 @@ del_kpriv:
 		}
 
 		/* drop the fake ref */
-		for_rx_tx(t) {
-			u_int i;
-			for (i = 0; i < nma_get_nrings(na, t); i++) {
-				struct netmap_kring *kring = NMR(na, t)[i];
-
-				kring->users--;
-				kring->nr_pending_mode = NKR_NETMAP_OFF;
-			}
-		}
-		--sna->kpriv->np_refs;
-		netmap_mem_if_delete(na, sna->kpriv->np_nifp);
-		netmap_mem_deref(na->nm_mem, na);
-		sna->kpriv->np_na = NULL;
-		sna->kpriv->np_nifp = NULL;
-		bzero(sna->kpriv, sizeof(*sna->kpriv));	/* for safety */
-		nm_os_free(sna->kpriv);
-		netmap_adapter_put(na);
+		//pst_priv_delete(sna->kpriv);
+		//sna->kpriv = NULL;
 
 		pst_extra_free(na);
 	}
