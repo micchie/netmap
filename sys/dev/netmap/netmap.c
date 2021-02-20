@@ -1012,11 +1012,11 @@ netmap_do_unregif(struct netmap_priv_d *priv)
 {
 	struct netmap_adapter *na = priv->np_na;
 
+	nm_prinf("%s active_fds %d", na->name, na->active_fds);
 	NMG_LOCK_ASSERT();
 	na->active_fds--;
 	/* unset nr_pending_mode and possibly release exclusive mode */
 	netmap_krings_put(priv);
-	nm_prinf("active_fds %d (deced) pending %d", na->active_fds, nm_kring_pending(priv));
 
 #ifdef	WITH_MONITOR
 	/* XXX check whether we have to do something with monitor
@@ -1107,7 +1107,7 @@ void
 netmap_priv_delete(struct netmap_priv_d *priv)
 {
 	struct netmap_adapter *na = priv->np_na;
-	int pst = !(strncmp("pst:0", na->name, 5));
+	//int pst = !(strncmp("pst:0", na->name, 5));
 
 	/* number of active references to this fd */
 	if (--priv->np_refs > 0) {
@@ -1121,17 +1121,17 @@ netmap_priv_delete(struct netmap_priv_d *priv)
 	bzero(priv, sizeof(*priv));	/* for safety */
 	nm_os_free(priv);
 
-	if (pst) {
-		struct netmap_pst_adapter *sna =
-				(struct netmap_pst_adapter *)na;
-		nm_prinf("%s pst %d ref %d", na->name, pst, na->na_refcount);
-		if (na->na_refcount == 1) {
-			netmap_do_unregif(sna->kpriv);
-			nm_os_free(sna->kpriv);
-			sna->kpriv = NULL;
-			netmap_adapter_put(na);
-		}
-	}
+//	if (pst) {
+//		struct netmap_pst_adapter *sna =
+//				(struct netmap_pst_adapter *)na;
+//		nm_prinf("%s pst %d ref %d", na->name, pst, na->na_refcount);
+//		if (na->na_refcount == 1) {
+//			netmap_do_unregif(sna->kpriv);
+//			nm_os_free(sna->kpriv);
+//			sna->kpriv = NULL;
+//			netmap_adapter_put(na);
+//		}
+//	}
 }
 
 
@@ -2542,6 +2542,7 @@ netmap_do_regif(struct netmap_priv_d *priv, struct netmap_adapter *na,
 	int error;
 
 	NMG_LOCK_ASSERT();
+	nm_prinf("%s active_fds %d", na->name, na->active_fds);
 	priv->np_na = na;     /* store the reference */
 	error = netmap_mem_finalize(na->nm_mem, na);
 	if (error)
