@@ -1317,7 +1317,7 @@ nm_os_pst_kwait(void *data)
 		PST_DBG("waiting for %d sockets to go", sna->num_so_adapters);
 		pause("netmap-pst-kwait-pause", 200);
 	}
-	nm_prinf("%s deleting priv", sna->up.up.name);
+	PST_DBG("%s deleting priv", sna->up.up.name);
 	NMG_LOCK();
 	sna->kpriv = NULL;
 	sna->kwaittdp = NULL;

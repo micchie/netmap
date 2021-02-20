@@ -1159,21 +1159,6 @@ pst_unregister_socket(struct pst_so_adapter *soa, int locked)
 		NM_SOCK_UNLOCK(so);
 	}
 	nm_os_free(soa);
-	/* no need to be atomic */
-#if 0
-#ifdef __FreeBSD__
-	if (sna->up.up.active_fds == 1 && sna->kwaittdp == NULL) {
-		/* starts on the first socket registered; keep monitoring
-		 * active_fds every 50ms; if it drops to 1 * (myself),
-		 * wait for all the associated sockets gone; then
-		 * priv_delete(kpriv).
-		 */
-		nm_prinf("spawning kwait thread");
-		kthread_add(nm_os_pst_kwait, (void *)sna, NULL, &sna->kwaittdp,
-				0, 0, "netmap-pst-kwait");
-	}
-#endif /* __FreeBSD__ */
-#endif
 	if (!locked)
 		mtx_unlock(&sna->so_adapters_lock);
 }
@@ -1207,7 +1192,6 @@ netmap_pst_bdg_dtor(const struct netmap_vp_adapter *vpna)
 
 	sna = (struct netmap_pst_adapter *)(void *)(uintptr_t)vpna;
 	mtx_lock(&sna->so_adapters_lock);
-	//nm_prinf("unregistering sockets");
 #ifndef __FreeBSD__
 	for (i = 0; i < sna->so_adapters_max; i++) {
 		struct pst_so_adapter *soa = sna->so_adapters[i];
@@ -1329,15 +1313,6 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 	int err;
 
 	if (onoff) {
-#if 0
-#ifdef __FreeBSD__
-		struct netmap_priv_d *kpriv;
-		struct netmap_if *nifp;
-		enum txrx t;
-		u_int i;
-#endif /* __FreeBSD__ */
-#endif
-
 		pst_write_offset(na, 0);
 		if (na->active_fds > 0) {
 			return 0;
@@ -1345,40 +1320,6 @@ netmap_pst_reg(struct netmap_adapter *na, int onoff)
 		err = pst_extra_alloc(na);
 		if (err)
 			return err;
-#if 0
-#ifdef __FreeBSD__
-		/* we're in do_regif() but active_fds hasn't been incremented
-		 * yet. Here's the simple version, also without hdr.
-		 */
-		kpriv = netmap_priv_new();
-		kpriv->np_na = na;
-		err = netmap_mem_finalize(na->nm_mem, na);
-		if (err)
-			goto del_kpriv;
-		for_rx_tx(t) {
-			kpriv->np_qfirst[t] = 0;
-			kpriv->np_qlast[t] = nma_get_nrings(na, t);
-			for (i = 0; i < nma_get_nrings(na, t); i++) {
-				NMR(na, t)[i]->users++;
-			}
-		}
-		/* we don't need rings_create() */
-		nifp = netmap_mem_if_new(na, kpriv);
-		if (nifp == NULL) {
-			err = ENOMEM;
-del_kpriv:
-			netmap_priv_delete(kpriv);
-			pst_extra_free(na);
-			return err;
-		}
-		kpriv->np_nifp = nifp;
-		na->active_fds++;
-
-		sna->kpriv = kpriv;
-		netmap_adapter_get(na);
-#endif /* __FreeBSD__ */
-#endif
-
 	}
 	if (!onoff) {
 		struct nm_bridge *b = vpna->na_bdg;
@@ -1387,7 +1328,7 @@ del_kpriv:
 		if (na->active_fds > 0)
 			goto vp_reg;
 #ifdef __FreeBSD__
-		nm_prinf("%s active_fds %d num_so_adapters %d", na->name,
+		PST_DBG("%s active_fds %d num_so_adapters %d", na->name,
 			na->active_fds, sna->num_so_adapters);
 		if (sna->num_so_adapters > 0) {
 			struct netmap_priv_d *kpriv;
@@ -1421,20 +1362,19 @@ del_kpriv:
 			}
 			kpriv->np_nifp = nifp;
 			na->active_fds++;
-	
+
 			sna->kpriv = kpriv;
 			netmap_adapter_get(na);
 			/* we cannot die, create another and return */
 
 			if (sna->kwaittdp != NULL)
 				panic("kwait already running");
-			nm_prinf("spwaning kwait");
+			PST_DBG("spwaning kwait");
 			kthread_add(nm_os_pst_kwait, (void *)sna, NULL,
 				    &sna->kwaittdp, 0, 0, "netmap-pst-kwait");
 			return EBUSY; // XXX the caller doesn't care
 		}
 #endif /* __FreeBSD__ */
-
 		for_bdg_ports(i, b) {
 			struct netmap_vp_adapter *s;
 			struct netmap_adapter *slvna;
@@ -1457,8 +1397,6 @@ del_kpriv:
 			}
 			netmap_adapter_put(slvna);
 		}
-
-		nm_prinf("%s freeing extra", na->name);
 		pst_extra_free(na);
 	}
 vp_reg:
