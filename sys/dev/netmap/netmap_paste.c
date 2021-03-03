@@ -822,16 +822,11 @@ netmap_pst_transmit(struct ifnet *ifp, struct mbuf *m)
 		csum_transmit(na, m);
 		return 0;
 	}
-	kring = nmcb_kring(cb);
-	if (unlikely(nmcb_rstate(cb) != MB_STACK) ||
-	    /* FreeBSD ARP reply recycles the request mbuf */
-	    unlikely(kring && kring->na->na_private == na->na_private)) {
-		MBUF_LINEARIZE(m); // XXX
-		csum_transmit(na, m);
-		return 0;
-	}
-	/* Valid cb, txsync-ing packet. */
-	slot = nmcb_slot(cb);
+#ifdef linux
+	/* for FreeBSD mbuf comes from our code */
+	nm_os_set_mbuf_data_destructor(m, &cb->ui,
+			nm_os_pst_mbuf_data_dtor);
+#endif /* linux */
 	if (unlikely(nmcb_rstate(cb) == MB_QUEUED)) {
 		/* originated by netmap but has been queued in either extra
 		 * or txring slot. The backend might drop this packet.
@@ -848,6 +843,16 @@ netmap_pst_transmit(struct ifnet *ifp, struct mbuf *m)
 		csum_transmit(na, m);
 		return 0;
 	}
+	kring = nmcb_kring(cb);
+	if (unlikely(nmcb_rstate(cb) != MB_STACK) ||
+	    /* FreeBSD ARP reply recycles the request mbuf */
+	    unlikely(kring && kring->na->na_private == na->na_private)) {
+		MBUF_LINEARIZE(m); // XXX
+		csum_transmit(na, m);
+		return 0;
+	}
+	/* Valid cb, txsync-ing packet. */
+	slot = nmcb_slot(cb);
 
 	nmb = NMB(na, slot);
 	/* bring protocol headers in */
@@ -899,11 +904,6 @@ csum_done:
 		PST_ASSERT("na %s kring %p cb NULL", na->name, kring);
 	}
 	nmcb_wstate(cb, MB_TXREF);
-#ifdef linux
-	/* for FreeBSD mbuf comes from our code */
-	nm_os_set_mbuf_data_destructor(m, &cb->ui,
-			nm_os_pst_mbuf_data_dtor);
-#endif /* linux */
 	m_freem(m);
 	return 0;
 }
@@ -1252,6 +1252,7 @@ pst_sodtor(NM_SOCK_T *so)
 	struct pst_so_adapter *soa = pst_so(so);
 
 	if (soa->so != so) {
+		nm_prinf("BUG soa->so != so");
 		pst_wso(NULL, so);
 		return;
 	}
